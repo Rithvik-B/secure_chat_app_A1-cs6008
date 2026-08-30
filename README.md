@@ -1,1 +1,2 @@
-# secure_chat_app_A1-cs6008
+# Building a Secure Chat Application
+Assignment : CS6008 - Network Security
