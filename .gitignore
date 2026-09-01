@@ -1,0 +1,7 @@
+# setup docs (notes and commands) I used while configuring VMS
+infra/
+
+# editor / OS noise
+.vscode/
+*.swp
+.DS_Store
