@@ -2,6 +2,7 @@
 
 **This is the section which I used most AI regarding setup and understading VM's networking and other configurations before actual assignment work**
 **Rest all phases (actual project phases) are done without much use of AI**
+**Main AI usage was used to write scripts to automate tests (.sh files)**
 
 Environment bring-up: VirtualBox VMs, SSH access, package installation, the `secure-chat` network,
 and the supporting documentation. No application code in this phase.
@@ -74,3 +75,8 @@ and the supporting documentation. No application code in this phase.
 # Phase 2 — Client–Server Confidentiality
 
 13. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protol.md, phase2/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase2/`: the self-test, matching-fingerprint logs, a ciphertext capture with Wireshark screenshots, Mallory's captured plaintext with mismatched fingerprints, and the tamper-rejection logs, write report until this phase2 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
+---
+
+# Phase 3 — Server Authentication via PKI
+
+14. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protocol.md, phase3/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase3/`: the PKI scripts and certificate summary, the legit authenticated-flow transcript with a Wireshark screenshot of the certificate in the handshake, the certificate-validation output over every cert variant, and the two MITM-now-fails transcripts (self-signed cert rejected by the chain check, stolen cert rejected by proof of possession), write report until this phase3 as described in assignement linking all of these in report/main.tex final report at report.pdf"*

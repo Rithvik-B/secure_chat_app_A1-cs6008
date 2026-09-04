@@ -1,0 +1,17 @@
+# openssl verify — independent check the server cert chains to the CA
+pki/out/server-cert.pem: OK
+
+# certcheck — the client validation logic (pki::validate_cert) over every cert
+#   good cert accepted; each bad cert rejected by the matching check
+ACCEPT  pki/out/server-cert.pem  : ok
+REJECT  pki/out/mallory-cert.pem : not signed by the trusted CA
+REJECT  pki/out/expired-cert.pem : outside its validity period
+REJECT  pki/out/wrongname-cert.pem : identity does not match expected server
+
+# server certificate summary
+issuer=C=IN, O=CS6008 Secure Chat, CN=CS6008 Root CA
+subject=C=IN, O=CS6008 Secure Chat, CN=chatserver.local
+notBefore=Sep  4 06:36:17 2026 GMT
+notAfter=Dec  7 06:36:17 2028 GMT
+X509v3 Subject Alternative Name: 
+    DNS:chatserver.local, IP Address:10.10.0.10

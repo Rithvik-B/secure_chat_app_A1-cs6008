@@ -3,13 +3,13 @@
 Wire protocol for the CS6008 secure chat application.
 
 This document describes the protocol **as currently implemented**. It grows with each phase; right
-now it covers Phases 1 and 2.
+now it covers Phases 1 through 3.
 
 | Phase | Status | Adds |
 |---|---|---|
 | 1 | implemented | Record framing, application grammar, username routing |
 | 2 | implemented | Diffie-Hellman key exchange, AES-256-GCM record encryption |
-| 3 | not started | Server authentication |
+| 3 | implemented | Server authentication: certificate + proof of possession |
 | 4 | not started | End-to-end encryption between clients |
 | 5 | not started | Key rotation |
 
@@ -24,7 +24,7 @@ now it covers Phases 1 and 2.
 ├──────────────────────────────────────────────────────────┤
 │ L3  Record encryption     AES-256-GCM  (Phase 2)          │
 ├──────────────────────────────────────────────────────────┤
-│ L2  Handshake             Diffie-Hellman  (Phase 2)       │
+│ L2  Handshake             Diffie-Hellman + certificate    │
 ├──────────────────────────────────────────────────────────┤
 │ L1  Record framing        [len:4][type:1][body]           │
 ├──────────────────────────────────────────────────────────┤
@@ -107,32 +107,71 @@ round-trips byte-exactly.
 
 ---
 
-# L2 — Handshake (Phase 2)
+# L2 — Handshake (Phases 2–3)
 
-Runs immediately after TCP connect, before any application data. Its job is to agree a shared secret
-that an eavesdropper cannot compute, using Diffie-Hellman.
+Runs immediately after TCP connect, before any application data. It agrees a shared secret with
+Diffie-Hellman (Phase 2) and, in Phase 3, authenticates the server with a certificate and a proof of
+possession before the client commits anything.
 
 A handshake record (`REC_HANDSHAKE`) carries a one-byte sub-type followed by its payload. Variable
 fields are `uint16` big-endian length-prefixed.
 
-| Sub-type | Name | Direction | Body |
-|---|---|---|---|
-| `0x01` | `HS_CLIENT_HELLO` | C → S | `[version:1][client_random:32]` |
-| `0x02` | `HS_SERVER_KEX` | S → C | `[version:1][dh_pub_len:2][dh_pub]` |
-| `0x05` | `HS_CLIENT_KEX` | C → S | `[dh_pub_len:2][dh_pub]` |
+| Sub-type | Name | Direction | Body | Phase |
+|---|---|---|---|---|
+| `0x01` | `HS_CLIENT_HELLO` | C → S | `[version:1][client_random:32]` | 2 |
+| `0x03` | `HS_SERVER_CERT` | S → C | `[cert_len:2][cert_der]` | 3 |
+| `0x02` | `HS_SERVER_KEX` | S → C | `[version:1][dh_pub_len:2][dh_pub]` | 2 |
+| `0x04` | `HS_SERVER_PROOF` | S → C | `[sig_len:2][sig]` | 3 |
+| `0x05` | `HS_CLIENT_KEX` | C → S | `[dh_pub_len:2][dh_pub]` | 2 |
 
 ```
-C → S   HS_CLIENT_HELLO {version, client_random}
-S → C   HS_SERVER_KEX   {version, server_pub}
-C → S   HS_CLIENT_KEX   {client_pub}
-        both sides compute Z = peer_pub^own_priv mod p, derive keys, print fingerprint
+                Phase 2                          Phase 3
+C → S   HS_CLIENT_HELLO {ver, random}    HS_CLIENT_HELLO {ver, random}
+S → C   HS_SERVER_KEX   {ver, B}         HS_SERVER_CERT  {cert}
+                                         HS_SERVER_KEX   {ver, B}
+                                         HS_SERVER_PROOF {sig}
+                                         ── client validates, or alert + close ──
+C → S   HS_CLIENT_KEX   {A}              HS_CLIENT_KEX   {A}
 ```
+
+Phase 3 is purely additive: two new server messages inserted into the same sequence. Both sides then
+compute `Z = peer_pub^own_priv mod p`, derive keys, and print a fingerprint.
 
 `HS_CLIENT_HELLO` **carries no DH value** — only a 32-byte random nonce. The client contributes its
-public value in `HS_CLIENT_KEX`, after it has received the server's message. In Phase 2 that gap does
-nothing useful yet, but Phase 3 inserts certificate validation between the two, and the client must
-be able to abort *before* it has committed to the exchange. The nonce exists for the same reason: in
-Phase 3 the server signs it, which is what makes a captured signature useless in any later session.
+public value in `HS_CLIENT_KEX`, *after* it has received and (in Phase 3) validated the server's
+messages, so a client that rejects the certificate has revealed nothing but 32 random bytes and can
+abort cleanly. The nonce is also what the server signs, which makes a captured signature useless in
+any later session.
+
+## Server authentication (Phase 3)
+
+### Certificate and proof of possession
+
+The server sends its X.509 certificate (`HS_SERVER_CERT`), then, after its DH value, a signature
+(`HS_SERVER_PROOF`):
+
+```
+sig = RSA-SHA256_sign( server_key,  version || client_random || cert_der || server_pub )
+```
+
+A certificate only asserts that a CA vouched a public key belongs to `chatserver.local`; it is a
+public file that anyone can copy. The signature is what proves the peer actually *holds* the matching
+private key — only that key can produce a signature the certificate's public key verifies. Signing a
+value that includes `client_random` binds the proof to this session, so it cannot be replayed.
+
+### Client validation — fail closed, in order
+
+The client checks, and aborts at the first failure (sending a `REC_ALERT` and nothing else — no DH
+value, no login):
+
+1. **Chain** — the certificate verifies against the trusted CA (`X509_verify_cert`).
+2. **Validity** — the current time is within the certificate's window.
+3. **Identity** — a SAN/CN matches the expected name (`X509_check_host`, `chatserver.local`).
+4. **Proof of possession** — the signature verifies against the certificate's public key over the
+   recomputed transcript.
+
+This defeats the Phase 2 MITM two ways: a self-signed certificate fails step 1, and a *stolen* real
+certificate (whose private key the attacker lacks) fails step 4.
 
 ### The Diffie-Hellman group
 
@@ -156,7 +195,7 @@ that happens to have a leading zero byte would otherwise serialise one byte shor
 the other, and the two ends would derive different keys roughly one time in 256.
 
 ```
-TH    = SHA-256( version || client_random || server_pub || client_pub )
+TH    = SHA-256( version || client_random || cert_der || server_pub || client_pub )
 
 K_c2s = SHA-256( "CS6008-P2-KEY|c2s|" || Z || TH )   // client -> server
 K_s2c = SHA-256( "CS6008-P2-KEY|s2c|" || Z || TH )   // server -> client
@@ -368,7 +407,7 @@ Evidence in [`../evidence/phase1/`](../evidence/phase1/).
 # Constants
 
 ```c
-#define PROTO_VERSION      0x02
+#define PROTO_VERSION      0x03
 #define CHAT_PORT          5555
 
 #define MAX_RECORD         16384
@@ -381,6 +420,8 @@ Evidence in [`../evidence/phase1/`](../evidence/phase1/).
 
 #define HS_CLIENT_HELLO    0x01
 #define HS_SERVER_KEX      0x02
+#define HS_SERVER_CERT     0x03
+#define HS_SERVER_PROOF    0x04
 #define HS_CLIENT_KEX      0x05
 #define CLIENT_RANDOM_LEN  32
 

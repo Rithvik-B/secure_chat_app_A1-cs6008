@@ -22,7 +22,7 @@
 \usepackage{tcolorbox}
 \usepackage[hidelinks]{hyperref}
 
-\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase0/}}
+\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase3/}{../evidence/phase0/}}
 
 %---------------------------------------------------------------------- colour
 \definecolor{accent}{HTML}{1F4E79}        % deep blue, used for headings and rules
@@ -47,7 +47,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\footnotesize\sffamily\color{accent}CS6008 --- Secure Chat Application}
-\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--2}
+\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--3}
 \fancyfoot[C]{\footnotesize\sffamily\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\headrule}{\hbox to\headwidth{\color{accentlt}\leaders\hrule height \headrulewidth\hfill}}
@@ -102,7 +102,8 @@
 {\sffamily\huge\bfseries Building a Secure Chat Application}\\[12pt]
 {\sffamily\large Phase 0 --- Deployment Environment\\[2pt]
  Phase 1 --- Baseline Chat Application\\[2pt]
- Phase 2 --- Confidentiality via Diffie--Hellman}\\[10pt]
+ Phase 2 --- Confidentiality via Diffie--Hellman\\[2pt]
+ Phase 3 --- Server Authentication via PKI}\\[10pt]
 {\color{accentlt}\rule{\textwidth}{1.2pt}}
 
 \vspace{1.6cm}
@@ -111,8 +112,8 @@
 \small
 \noindent
 A one-to-one chat application over TCP sockets, to be hardened across five phases. This report covers
-the deployment environment, the baseline plaintext application, and confidentiality via
-Diffie--Hellman, each with its verification.
+the deployment environment, the baseline plaintext application, confidentiality via Diffie--Hellman,
+and server authentication via a PKI, each with its verification.
 
 \medskip
 \noindent
@@ -122,8 +123,9 @@ length-prefixed record protocol chosen so that the framing remains valid once me
 being printable text. Phase~1 deliberately provides no confidentiality: the server logs every message
 and a packet capture shows the whole conversation in cleartext. Phase~2 closes that gap with a
 Diffie--Hellman key exchange written from first principles and AES-256-GCM record encryption, then
-demonstrates a man-in-the-middle proxy defeating it --- motivating the authentication added in later
-phases. No TLS library is used anywhere.
+demonstrates a man-in-the-middle proxy defeating it. Phase~3 adds a Public Key Infrastructure --- a
+Certificate Authority, a server certificate, and a proof of possession --- so the client authenticates
+the server and the same attack now fails. No TLS library is used anywhere.
 \end{minipage}
 
 \vfill
@@ -144,8 +146,9 @@ phases. No TLS library is used anywhere.
 
 This report documents the first stages of a one-to-one chat application built over TCP sockets and
 progressively hardened across five phases. It covers the deployment environment (Phase~0), the
-baseline plaintext chat application (Phase~1), and confidentiality via Diffie--Hellman with a
-man-in-the-middle attack against it (Phase~2), each with its verification.
+baseline plaintext chat application (Phase~1), confidentiality via Diffie--Hellman with a
+man-in-the-middle attack against it (Phase~2), and server authentication via a PKI that defeats that
+attack (Phase~3), each with its verification.
 
 The application is written in C++17 using POSIX sockets only. No TLS/SSL library is used anywhere:
 \texttt{<openssl/ssl.h>} and \texttt{<openssl/dh.h>} are excluded by design, as required. Phase~1
@@ -758,21 +761,181 @@ Explanation: detectable evidence of the MITM and why a user misses it & Done \\
 \end{center}
 
 %======================================================================
+\section{Phase 3 --- Server Authentication via PKI}
+
+\begin{keybox}
+\textbf{What changed since Phase 2.} Before the key exchange, the server now sends a CA-signed
+certificate and a signature proving it holds the matching private key; the client validates both and
+aborts if anything is wrong. The record encryption, application grammar and routing are unchanged. The
+same man-in-the-middle proxy that succeeded in Phase 2 now fails.
+\end{keybox}
+
+\subsection{Requirements}
+
+Phase~3 requires a Certificate Authority and a CA-signed server certificate (via OpenSSL); the server
+sending its certificate before the DH exchange; the client validating the certificate's chain,
+validity period and identity, and aborting on failure without revealing anything further; the server
+proving possession of its private key; and a re-run of the Phase~2 MITM showing it now fails, including
+the case where the attacker holds the certificate file but not its private key.
+
+\subsection{The PKI}
+
+Three OpenSSL scripts (\texttt{phase3/pki/}) build the infrastructure on the server VM: a CA (private
+key and self-signed root), then a server key and CSR that the CA signs. The certificate binds the name
+\texttt{chatserver.local} (and \texttt{IP:10.10.0.10}) via Subject Alternative Names.
+
+\begin{lstlisting}
+issuer=  CN=CS6008 Root CA
+subject= CN=chatserver.local
+X509v3 Subject Alternative Name: DNS:chatserver.local, IP Address:10.10.0.10
+$ openssl verify -CAfile ca-cert.pem server-cert.pem  ->  server-cert.pem: OK
+\end{lstlisting}
+
+\subsection{Certificate and proof of possession}
+
+\sloppy
+The handshake gains two server messages: \texttt{HS\_SERVER\_CERT} (before the DH value) and
+\texttt{HS\_SERVER\_PROOF} (after it). The proof is
+
+\begin{center}\small\ttfamily
+sig = RSA-SHA256\_sign( server\_key,\ \ version $\Vert$ client\_random $\Vert$ cert $\Vert$ server\_pub )
+\end{center}
+
+This distinction is the heart of the phase. A \emph{certificate} only asserts that a CA once vouched
+that a public key belongs to \texttt{chatserver.local}; it is a public file, and anyone can copy it.
+It does not prove that the party presenting it actually holds the corresponding private key. The
+\emph{proof of possession} closes that gap: only the holder of the private key can produce a signature
+that verifies against the public key in the certificate. Including \texttt{client\_random} in the
+signed value binds the proof to this session, so a signature captured from one session cannot be
+replayed into another. The certificate answers ``whose key is this?''; the signature answers ``does
+this peer hold it, now?''.
+\fussy
+
+\subsection{Client validation}
+
+The client checks the following in order and aborts at the first failure, sending an alert and nothing
+else --- crucially, it has not yet sent its own DH value, so a client that rejects the server has
+revealed only 32 random bytes:
+
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+\item \textbf{Chain} --- the certificate verifies against the trusted CA (\texttt{X509\_verify\_cert}).
+\item \textbf{Validity} --- the current time is within the certificate's window.
+\item \textbf{Identity} --- a SAN/CN matches the expected name (\texttt{X509\_check\_host}).
+\item \textbf{Proof of possession} --- the signature verifies against the certificate's public key.
+\end{enumerate}
+
+The \texttt{certcheck} tool runs this exact logic over each certificate variant
+(\texttt{cert-validation.txt}); every bad certificate is rejected by precisely the check that should
+catch it:
+
+\begin{lstlisting}
+ACCEPT  server-cert.pem    : ok
+REJECT  mallory-cert.pem   : not signed by the trusted CA           (a) chain
+REJECT  expired-cert.pem   : outside its validity period            (b) validity
+REJECT  wrongname-cert.pem : identity does not match expected server (c) identity
+\end{lstlisting}
+
+\subsection{Verification --- legitimate flow}
+
+Both clients validate the certificate and complete the exchange (\texttt{chat-transcript.md}):
+
+\begin{lstlisting}
+alice(C1) | server certificate verified (chatserver.local); key exchange complete, fingerprint 6069079c...
+bob(C2)   | server certificate verified (chatserver.local); key exchange complete, fingerprint ...
+\end{lstlisting}
+
+The certificate travels in the clear in the handshake --- which is correct, a certificate is public.
+Figure~\ref{fig:p3cert} shows it in the capture, with \texttt{CS6008 Secure Chat}, \texttt{CS6008 Root
+CA} and \texttt{chatserver.local} readable in the certificate record, while no chat word appears
+anywhere in the capture. Figure~\ref{fig:p3follow} shows the same in Follow~$\rightarrow$~TCP Stream:
+the certificate is legible, everything after it is ciphertext.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{wireshark-certificate-in-handshake.png}
+\caption{Phase 3, \texttt{chat.pcap}, frame 6 --- the server's certificate in the handshake. The ASCII
+column shows the readable X.509 identity (\texttt{CS6008 Secure Chat}, \texttt{Root CA},
+\texttt{chatserver.local}). A certificate is public, so this is expected; the chat content that
+follows remains AES-GCM encrypted.}
+\label{fig:p3cert}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{wireshark-follow-tcp-stream.png}
+\caption{Phase 3, Follow~$\rightarrow$~TCP Stream. The server's certificate is readable in the
+handshake (blue); the Diffie--Hellman values and all chat that follow are unreadable ciphertext.}
+\label{fig:p3follow}
+\end{figure}
+
+\subsection{Attack --- the MITM now fails}
+
+The Phase~2 proxy is re-run against the authenticated protocol. It cannot obtain a CA-signed
+certificate, so it is rejected two ways.
+
+\paragraph{Self-signed certificate.} Mallory presents a self-signed certificate with the right name.
+The chain check fails and the client aborts before sending anything
+(\texttt{mitm-selfsigned-transcript.md}):
+
+\begin{lstlisting}
+MALLORY   | victim rejected the presented certificate -- attack failed
+alice(C1) | handshake aborted: certificate rejected: not signed by the trusted CA
+\end{lstlisting}
+
+\paragraph{Stolen certificate, no private key (\S4.2).} Mallory copies the real \texttt{server-cert.pem}
+(a public file) but lacks its private key, so she signs with a key of her own. The certificate passes
+chain, validity and identity, but the proof of possession fails
+(\texttt{mitm-stolen-transcript.md}):
+
+\begin{lstlisting}
+alice(C1) | handshake aborted: proof of possession failed:
+            server does not hold the certificate's private key
+\end{lstlisting}
+
+In both cases the client reveals nothing --- a direct contrast to Phase~2, where this same proxy read
+every message.
+
+\subsection{Deliverables checklist}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} \\
+\midrule
+CA and CA-signed server certificate via OpenSSL & Done \\
+Server sends its certificate before the DH exchange & Done \\
+Client validates chain, validity period and identity & Done \\
+On failure: aborts, sends no password / no DH / nothing further & Done \\
+Server proves possession of the private key & Done \\
+Full legitimate flow: validate, complete DH, chat & Done \\
+Same MITM re-run now fails (self-signed cert) & Done \\
+Attacker with the cert file but not the key is rejected (proof of possession) & Done \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%======================================================================
 \section{Building and Running}
 
 \begin{lstlisting}
-cd phaseN && make            # phase1: server, client. phase2: + mitm, selftest
-make test                    # phase2: run the crypto self-test
+cd phaseN && make            # phase2: + mitm, selftest.  phase3: + certcheck
+make test                    # run the crypto self-test (phase 2+)
 
-# on vm1-server (10.10.0.10)
-./server --log server.log
+# phase 3: build the PKI first (on the server VM, the CA host)
+cd pki && ./make-ca.sh && ./make-server-cert.sh && ./make-attack-certs.sh
 
-# on vm2-client1 / vm3-client2
-./client 10.10.0.10 alice
-./client 10.10.0.10 bob
+# server (10.10.0.10)  -- phase 3 needs --cert/--key
+./server                                                   # phase 1-2
+./server --cert pki/out/server-cert.pem --key pki/out/server-key.pem   # phase 3
 
-# phase 2 MITM: on vm4-mallory, then point the victim at 10.10.0.13
-./mitm --listen 10.10.0.13 --server 10.10.0.10 --log mallory.log [--tamper]
+# clients (10.10.0.11 / .12)  -- phase 3 needs --ca
+./client 10.10.0.10 alice                                  # phase 1-2
+./client 10.10.0.10 alice --ca certs/ca-cert.pem --expect chatserver.local  # phase 3
+
+# MITM on vm4-mallory, then point the victim at 10.10.0.13
+./mitm --listen 10.10.0.13 --server 10.10.0.10 --log mallory.log [--tamper]  # phase 2
+./mitm ... --ca certs/ca-cert.pem --present-cert C --present-key K            # phase 3
 
 # packet capture, on any VM
 sudo tshark -i enp0s8 -f 'tcp port 5555' -w /tmp/cap.pcap
@@ -786,11 +949,10 @@ files stored under \texttt{/home}.
 %======================================================================
 \section{Next Phase}
 
-Phase~2 established confidentiality but not authentication: the man-in-the-middle attack succeeds
-because Diffie--Hellman agrees a key with whoever answers. Phase~3 adds a Public Key Infrastructure ---
-a Certificate Authority, a server certificate, and a proof that the server holds the matching private
-key --- so the client can verify it is talking to the real server before the exchange proceeds. The
-same MITM proxy will then be re-run to show it can no longer succeed.
+Phases 2 and 3 secure the client--server link, but the server itself still reads every message it
+relays. Phase~4 adds end-to-end encryption between the two clients: they establish a shared key the
+server cannot derive, so it relays only opaque ciphertext. Phase~5 then rotates that key periodically
+for forward secrecy.
 
 %======================================================================
 \appendix

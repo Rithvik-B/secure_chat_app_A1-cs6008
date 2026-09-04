@@ -1,0 +1,15 @@
+[2026-09-04T06:36:59Z] START phase3 DH + AES-256-GCM relay, authenticated (PKI) on 0.0.0.0:5555 (log: chat-server.log)
+[2026-09-04T06:37:05Z] CONN  10.10.0.12:55526
+[2026-09-04T06:37:05Z] CONN  10.10.0.11:58960
+[2026-09-04T06:37:05Z] KEX   10.10.0.12:55526 session established, fingerprint=806d8cefab1f2ff5
+[2026-09-04T06:37:05Z] LOGIN bob from 10.10.0.12:55526
+[2026-09-04T06:37:05Z] KEX   10.10.0.11:58960 session established, fingerprint=6069079c9db74cb8
+[2026-09-04T06:37:05Z] LOGIN alice from 10.10.0.11:58960
+[2026-09-04T06:37:07Z] RELAY alice -> bob : "the server proved its identity with a certificate"
+[2026-09-04T06:37:11Z] RELAY bob -> alice : "confirmed, my client validated the same CA-signed cert"
+[2026-09-04T06:37:11Z] RELAY alice -> bob : "a mitm cannot forge that, so this channel is authenticated"
+[2026-09-04T06:37:15Z] QUIT  alice
+[2026-09-04T06:37:15Z] CLOSE alice (quit)
+[2026-09-04T06:37:16Z] QUIT  bob
+[2026-09-04T06:37:16Z] CLOSE bob (quit)
+[2026-09-04T06:37:44Z] STOP  shutting down

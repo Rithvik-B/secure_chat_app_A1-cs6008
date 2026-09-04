@@ -28,3 +28,9 @@ report/*.toc
 report/*.fls
 report/*.fdb_latexmk
 report/*.synctex.gz
+
+# generated PKI (certs/keys) — regenerate with phase3/pki/*.sh
+phase*/pki/out/
+phase*/certs/
+phase*/certcheck
+*-key.pem

@@ -1,0 +1,8 @@
+06:37:05 server certificate verified (chatserver.local); key exchange complete, fingerprint 6069079c9db74cb8
+06:37:05 connected to 10.10.0.10:5555 as alice
+06:37:05 commands: @user message | /chat user | /who | /quit
+06:37:05 ----------------------------------------------------
+06:37:07 you -> bob: the server proved its identity with a certificate
+06:37:11 bob> confirmed, my client validated the same CA-signed cert
+06:37:11 you -> bob: a mitm cannot forge that, so this channel is authenticated
+06:37:15 * bye

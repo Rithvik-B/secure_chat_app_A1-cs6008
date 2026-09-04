@@ -1,0 +1,2 @@
+[2026-09-04T06:39:11Z] START phase3 DH + AES-256-GCM relay, authenticated (PKI) on 0.0.0.0:5555 (log: mitm-selfsigned-server.log)
+[2026-09-04T06:39:33Z] STOP  shutting down
