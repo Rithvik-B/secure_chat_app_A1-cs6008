@@ -1,0 +1,12 @@
+07:03:49 server certificate verified (chatserver.local); key exchange complete, fingerprint 26ea5ff5cc3fe482
+07:03:49 connected to 10.10.0.10:5555 as alice
+07:03:49 commands: @user msg | /chat user | /e2e user | /who | /quit
+07:03:49 ----------------------------------------------------
+07:03:51 you -> bob: this line is only server-encrypted, the server can read it
+07:03:55 * requesting end-to-end session with bob ...
+07:03:55 * end-to-end session established with bob, fingerprint 1cf3a11922709169
+07:03:58 you -> bob [e2e]: now the server sees only ciphertext for our messages
+07:04:01 bob [e2e]> confirmed, decrypting locally with our shared key
+07:04:02 you -> bob [e2e]: end to end, even the relay is blind
+07:04:06 * bob left
+07:04:06 * bye

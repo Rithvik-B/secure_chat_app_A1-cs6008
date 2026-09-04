@@ -3,14 +3,14 @@
 Wire protocol for the CS6008 secure chat application.
 
 This document describes the protocol **as currently implemented**. It grows with each phase; right
-now it covers Phases 1 through 3.
+now it covers Phases 1 through 4.
 
 | Phase | Status | Adds |
 |---|---|---|
 | 1 | implemented | Record framing, application grammar, username routing |
 | 2 | implemented | Diffie-Hellman key exchange, AES-256-GCM record encryption |
 | 3 | implemented | Server authentication: certificate + proof of possession |
-| 4 | not started | End-to-end encryption between clients |
+| 4 | implemented | End-to-end encryption between clients (server-blind) |
 | 5 | not started | Key rotation |
 
 ---
@@ -19,6 +19,8 @@ now it covers Phases 1 through 3.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
+│ L5  End-to-end (Phase 4)  __E2E_* inside <text>, C1<->C2  │
+├──────────────────────────────────────────────────────────┤
 │ L4  Application grammar   LOGIN / MSG / WHO / QUIT        │
 │                           OK / ERR / FROM / USERS / INFO  │
 ├──────────────────────────────────────────────────────────┤
@@ -123,6 +125,7 @@ fields are `uint16` big-endian length-prefixed.
 | `0x02` | `HS_SERVER_KEX` | S → C | `[version:1][dh_pub_len:2][dh_pub]` | 2 |
 | `0x04` | `HS_SERVER_PROOF` | S → C | `[sig_len:2][sig]` | 3 |
 | `0x05` | `HS_CLIENT_KEX` | C → S | `[dh_pub_len:2][dh_pub]` | 2 |
+
 
 ```
                 Phase 2                          Phase 3
@@ -336,7 +339,76 @@ The server logs every message it handles, with the full text:
 
 `RELAY` is written only after the recipient resolves, so the line means the message was actually
 delivered. This log is the Phase 1 evidence that the server can read the entire content of every
-message passing through it.
+message passing through it — and, from Phase 4, the evidence that it no longer can.
+
+---
+
+# L5 — End-to-end encryption (Phase 4)
+
+Phases 2–3 secure the client-server link, but the server still reads every message. Phase 4 adds a
+second encryption layer *between the two clients* that the server cannot read. It lives entirely
+inside the `<text>` field of `MSG` / `FROM`, so **the server's routing is unchanged** — it forwards
+the field verbatim, exactly as before, and never learns the layer exists. The whole feature is in the
+client; `server.cpp` is byte-for-byte identical to Phase 3.
+
+### Wire tags
+
+Carried as the `<text>` of an ordinary `MSG` / `FROM`, base64 because `<text>` is a text field:
+
+```
+__E2E_INIT__<b64>   __E2E_ACK__<b64>   __E2E_MSG__<b64>
+```
+
+`__E2E_INIT__` / `__E2E_ACK__` decode to `[version:1][epoch:4][dh_pub_len:2][dh_pub]`;
+`__E2E_MSG__` decodes to `[epoch:4][ciphertext][tag:16]`. The `epoch` field is present from Phase 4
+(always 0 here) so that Phase 5 rekeying needs no format change.
+
+### Handshake
+
+```
+alice types /e2e bob
+alice → server → bob    MSG bob   __E2E_INIT__<b64(ver, epoch 0, A)>
+bob   → server → alice  MSG alice __E2E_ACK__ <b64(ver, epoch 0, B)>
+both derive Z_e2e = peer^own mod p, derive keys, print a fingerprint
+```
+
+A second Diffie-Hellman, over the same MODP-2048 group, run directly between the clients. The server
+relays two `MSG`s and understands neither.
+
+### Key derivation
+
+"a" is the lexicographically smaller username, "b" the larger, so both sides agree on directions
+without negotiating:
+
+```
+K_a2b  = SHA-256("CS6008-P4-KEY|"  || epoch(4) || "|a2b|" || Z_e2e)
+K_b2a  = SHA-256("CS6008-P4-KEY|"  || epoch(4) || "|b2a|" || Z_e2e)
+salt   = SHA-256("CS6008-P4-SALT|" || epoch(4) || Z_e2e)[0..3]
+FP_e2e = SHA-256("CS6008-P4-FP|"   || epoch(4) || Z_e2e)[0..7]
+```
+
+Records use AES-256-GCM with the same implicit-counter nonce as L3, keyed per (epoch, direction).
+Both clients print `FP_e2e`, which match — the §5.2 evidence.
+
+### Two layers
+
+A `__E2E_MSG__` is encrypted with the C1↔C2 key, *then* the whole `MSG bob __E2E_MSG__...` line is
+encrypted again by the client-server link (L3) on the way to the server. So the server, which can
+decrypt the outer layer, sees only the opaque `__E2E_MSG__` base64; a wire sniffer sees neither layer.
+
+### Dispatch rule
+
+On `FROM sender <text>` the client branches on the tag prefix:
+
+| Prefix | Action |
+|---|---|
+| `__E2E_INIT__` / `__E2E_ACK__` | complete the handshake — **never** shown as chat |
+| `__E2E_MSG__` | decrypt with the epoch key, show as `sender [e2e]> ...` |
+| anything else | plain chat |
+
+Two rules keep this unambiguous (§1.4 property 2): outgoing text starting with `__E2E` is refused, so
+a user cannot forge a tag; and a *plain* message from a peer with an active E2E session is flagged as
+a downgrade rather than shown as normal chat.
 
 ---
 
@@ -407,7 +479,7 @@ Evidence in [`../evidence/phase1/`](../evidence/phase1/).
 # Constants
 
 ```c
-#define PROTO_VERSION      0x03
+#define PROTO_VERSION      0x04
 #define CHAT_PORT          5555
 
 #define MAX_RECORD         16384

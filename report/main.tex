@@ -22,7 +22,7 @@
 \usepackage{tcolorbox}
 \usepackage[hidelinks]{hyperref}
 
-\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase3/}{../evidence/phase0/}}
+\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase3/}{../evidence/phase4/}{../evidence/phase0/}}
 
 %---------------------------------------------------------------------- colour
 \definecolor{accent}{HTML}{1F4E79}        % deep blue, used for headings and rules
@@ -47,7 +47,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\footnotesize\sffamily\color{accent}CS6008 --- Secure Chat Application}
-\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--3}
+\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--4}
 \fancyfoot[C]{\footnotesize\sffamily\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\headrule}{\hbox to\headwidth{\color{accentlt}\leaders\hrule height \headrulewidth\hfill}}
@@ -103,7 +103,8 @@
 {\sffamily\large Phase 0 --- Deployment Environment\\[2pt]
  Phase 1 --- Baseline Chat Application\\[2pt]
  Phase 2 --- Confidentiality via Diffie--Hellman\\[2pt]
- Phase 3 --- Server Authentication via PKI}\\[10pt]
+ Phase 3 --- Server Authentication via PKI\\[2pt]
+ Phase 4 --- End-to-End Encryption Between Clients}\\[10pt]
 {\color{accentlt}\rule{\textwidth}{1.2pt}}
 
 \vspace{1.6cm}
@@ -113,7 +114,8 @@
 \noindent
 A one-to-one chat application over TCP sockets, to be hardened across five phases. This report covers
 the deployment environment, the baseline plaintext application, confidentiality via Diffie--Hellman,
-and server authentication via a PKI, each with its verification.
+server authentication via a PKI, and end-to-end encryption between the two clients, each with its
+verification.
 
 \medskip
 \noindent
@@ -125,7 +127,9 @@ and a packet capture shows the whole conversation in cleartext. Phase~2 closes t
 Diffie--Hellman key exchange written from first principles and AES-256-GCM record encryption, then
 demonstrates a man-in-the-middle proxy defeating it. Phase~3 adds a Public Key Infrastructure --- a
 Certificate Authority, a server certificate, and a proof of possession --- so the client authenticates
-the server and the same attack now fails. No TLS library is used anywhere.
+the server and the same attack now fails. Phase~4 adds encryption directly between the two clients,
+riding inside the relay's message field, so the server forwards only opaque data it cannot read ---
+with no change to the server at all. No TLS library is used anywhere.
 \end{minipage}
 
 \vfill
@@ -147,8 +151,9 @@ the server and the same attack now fails. No TLS library is used anywhere.
 This report documents the first stages of a one-to-one chat application built over TCP sockets and
 progressively hardened across five phases. It covers the deployment environment (Phase~0), the
 baseline plaintext chat application (Phase~1), confidentiality via Diffie--Hellman with a
-man-in-the-middle attack against it (Phase~2), and server authentication via a PKI that defeats that
-attack (Phase~3), each with its verification.
+man-in-the-middle attack against it (Phase~2), server authentication via a PKI that defeats that
+attack (Phase~3), and end-to-end encryption between the clients (Phase~4), each with its
+verification.
 
 The application is written in C++17 using POSIX sockets only. No TLS/SSL library is used anywhere:
 \texttt{<openssl/ssl.h>} and \texttt{<openssl/dh.h>} are excluded by design, as required. Phase~1
@@ -916,6 +921,112 @@ Attacker with the cert file but not the key is rejected (proof of possession) & 
 \end{center}
 
 %======================================================================
+\section{Phase 4 --- End-to-End Encryption Between Clients}
+
+\begin{keybox}
+\textbf{What changed since Phase 3.} The two clients now establish a shared key directly, and encrypt
+chat to each other \emph{inside} the existing client-server link, so the server relays only opaque
+data it cannot read. The entire feature is in the client: \texttt{server.cpp} is byte-for-byte
+identical to Phase 3.
+\end{keybox}
+
+\subsection{Requirements}
+
+Phase~4 requires the two clients to establish a shared secret that is independent of, and not
+derivable by, the server, using the server purely as a relay; triggered by \texttt{/e2e username} and
+carried with the fixed wire tags \texttt{\_\_E2E\_INIT\_\_}, \texttt{\_\_E2E\_ACK\_\_} and
+\texttt{\_\_E2E\_MSG\_\_}, so the server's routing need not change; with the server seeing only opaque
+data for chat once the session is established; independently-computed fingerprints on both clients
+that match; and the inner layer sitting inside the Phase~3 encrypted link.
+
+\subsection{Design}
+
+The E2E layer lives entirely inside the \texttt{<text>} field of an ordinary \texttt{MSG}/\texttt{FROM}
+message, base64-encoded because that field is text. \texttt{/e2e bob} runs a second Diffie--Hellman,
+over the same MODP-2048 group, directly between the clients:
+
+\begin{lstlisting}
+alice -> server -> bob    MSG bob   __E2E_INIT__<b64(ver, epoch 0, A)>
+bob   -> server -> alice  MSG alice __E2E_ACK__ <b64(ver, epoch 0, B)>
+both derive Z_e2e = peer^own mod p, derive keys, print FP_e2e
+\end{lstlisting}
+
+The keys are labelled by direction --- ``a'' is the lexicographically smaller username, ``b'' the
+larger --- so both ends agree on which key is which without negotiating. The payload carries an
+\texttt{epoch} field, always 0 here, so that Phase~5's rekeying needs no format change.
+
+\paragraph{The server does not change.} Because the tags ride inside \texttt{<text>}, which the server
+copies verbatim, \texttt{server.cpp} is unmodified from Phase~3 --- a fact confirmed by
+\texttt{diff}, and visible in the evidence: the Phase~4 server's start banner still reads
+\texttt{START phase3}, because it is the same binary. This is assignment \S1.4 property~(1) satisfied by
+construction.
+
+\paragraph{Two layers.} An E2E message is encrypted with the C1$\leftrightarrow$C2 key, then the whole
+line is encrypted again by the client-server link on the way to the server. The server can decrypt the
+outer layer --- so it \emph{logs} the message --- but sees only the opaque \texttt{\_\_E2E\_MSG\_\_}
+base64 for chat content; a wire sniffer sees neither layer.
+
+\paragraph{Dispatch (\S1.4 property 2).} Each incoming \texttt{FROM} is dispatched on its tag: handshake
+tags complete the session and are never shown as chat; a \texttt{\_\_E2E\_MSG\_\_} is decrypted and
+shown as \texttt{sender [e2e]>}; anything else is plain chat. Outgoing text starting with
+\texttt{\_\_E2E} is refused (a user cannot forge a tag), and a plain message from a peer with an active
+E2E session is flagged as a downgrade rather than shown normally.
+
+\subsection{Verification}
+
+Both clients print a matching end-to-end fingerprint, independent of the separate fingerprints of
+their client-server sessions (\texttt{e2e-transcript.md}):
+
+\begin{lstlisting}
+alice(C1) | server session fingerprint 26ea5ff5...   bob(C2) | server session fingerprint 2138f6c1...
+alice(C1) | end-to-end established with bob,   fingerprint 1cf3a11922709169
+bob(C2)   | end-to-end established with alice, fingerprint 1cf3a11922709169    <- matches
+bob(C2)   | alice [e2e]> now the server sees only ciphertext for our messages  <- decrypted by bob
+\end{lstlisting}
+
+The server's relay log shows the required before/after contrast (\texttt{server-view.txt}): a message
+sent before \texttt{/e2e} is logged in full, but every message after is opaque.
+
+\begin{lstlisting}
+before /e2e:  RELAY alice -> bob : "this line is only server-encrypted, the server can read it"
+after  /e2e:  RELAY alice -> bob : "__E2E_MSG__AAAAAKHfPIs0SpKJ+y00bwVM0bvJSfJSx5ODMs9Jz/+OlY4..."
+\end{lstlisting}
+
+On the wire the content is doubly hidden: searching the capture for the chat words and even the E2E
+tags found them all zero, except \texttt{chatserver.local} once (the certificate).
+Figure~\ref{fig:p4wire} shows the Follow~$\rightarrow$~TCP Stream: the certificate is readable in the
+handshake, everything after is ciphertext.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{wireshark-wire-is-opaque.png}
+\caption{Phase 4, Follow~$\rightarrow$~TCP Stream. Only the certificate in the handshake is readable;
+all chat --- including the E2E tags, which sit inside the outer encryption --- is ciphertext. The E2E
+content is hidden from a wire sniffer, and (per the server log) from the relay itself.}
+\label{fig:p4wire}
+\end{figure}
+
+\subsection{Deliverables checklist}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} \\
+\midrule
+C1$\leftrightarrow$C2 shared secret, independent of and not derivable by the server & Done \\
+Triggered by \texttt{/e2e}, using the fixed \texttt{\_\_E2E\_*} tags & Done \\
+Server routing unchanged (\texttt{server.cpp} identical to Phase 3) & Done \\
+Server sees only opaque data for E2E chat; contrast with a pre-E2E message & Done \\
+Independently-computed fingerprints on both clients match & Done \\
+A C1 message is correctly decrypted and displayed by C2 & Done \\
+E2E is an inner layer, inside the Phase 3 client-server link & Done \\
+Handshake tags never shown as chat; chat never treated as handshake & Done \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%======================================================================
 \section{Building and Running}
 
 \begin{lstlisting}
@@ -931,7 +1042,8 @@ cd pki && ./make-ca.sh && ./make-server-cert.sh && ./make-attack-certs.sh
 
 # clients (10.10.0.11 / .12)  -- phase 3 needs --ca
 ./client 10.10.0.10 alice                                  # phase 1-2
-./client 10.10.0.10 alice --ca certs/ca-cert.pem --expect chatserver.local  # phase 3
+./client 10.10.0.10 alice --ca certs/ca-cert.pem --expect chatserver.local  # phase 3-4
+#   phase 4: type "/e2e bob" in the client to start end-to-end with bob
 
 # MITM on vm4-mallory, then point the victim at 10.10.0.13
 ./mitm --listen 10.10.0.13 --server 10.10.0.10 --log mallory.log [--tamper]  # phase 2
@@ -949,10 +1061,10 @@ files stored under \texttt{/home}.
 %======================================================================
 \section{Next Phase}
 
-Phases 2 and 3 secure the client--server link, but the server itself still reads every message it
-relays. Phase~4 adds end-to-end encryption between the two clients: they establish a shared key the
-server cannot derive, so it relays only opaque ciphertext. Phase~5 then rotates that key periodically
-for forward secrecy.
+Phase~4 keeps one end-to-end key for the whole session, so an attacker who later compromised that key
+could read every message ever exchanged under it. Phase~5 adds forward secrecy: the C1$\leftrightarrow$C2
+key is renegotiated on a timer, each new key independent of the last and the old one discarded, so a
+compromised key exposes only a bounded window of traffic.
 
 %======================================================================
 \appendix

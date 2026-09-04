@@ -1,0 +1,9 @@
+# Server relay log — what the relay can read (assignment §5.2)
+#
+# Before the E2E session, the server logs the message in full:
+[2026-09-04T07:03:51Z] RELAY alice -> bob : "this line is only server-encrypted, the server can read it"
+#
+# After /e2e, every chat message is opaque base64 the server cannot decrypt:
+[2026-09-04T07:03:58Z] RELAY alice -> bob : "__E2E_MSG__AAAAAKHfPIs0SpKJ+y00bwVM0bvJSfJSx5ODMs9Jz/+OlY4ghjtfcZg2OcloAoKpKwtJ16eJSqCSdkzhvLEhfDa2coQ1nlmR"
+[2026-09-04T07:04:01Z] RELAY bob -> alice : "__E2E_MSG__AAAAABzPq0NJ7MlWhESN38oqxLmQsHkIiZUYMenSFbUZhE3KsGbjEgfk2f5cnWVkidOqxGUCZTPa5CaoM1E/xr1mgncw"
+[2026-09-04T07:04:02Z] RELAY alice -> bob : "__E2E_MSG__AAAAAOSdL5bHk6Wg/oFaXZQI0P2TY0h4ObI8nKDDMrdnqTP8FjoGT85ejd0urUUspdqxeXrvjw=="

@@ -80,3 +80,9 @@ and the supporting documentation. No application code in this phase.
 # Phase 3 — Server Authentication via PKI
 
 14. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protocol.md, phase3/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase3/`: the PKI scripts and certificate summary, the legit authenticated-flow transcript with a Wireshark screenshot of the certificate in the handshake, the certificate-validation output over every cert variant, and the two MITM-now-fails transcripts (self-signed cert rejected by the chain check, stolen cert rejected by proof of possession), write report until this phase3 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
+
+---
+
+# Phase 4 — End-to-End Encryption Between Clients
+
+15. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protocol.md, phase4/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase4/`: the self-test, the interleaved end-to-end transcript with the matching client-to-client fingerprints, the server relay log showing readable text before /e2e and opaque __E2E_MSG__ after it, and a Wireshark screenshot confirming the wire carries only ciphertext, write report until this phase4 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
