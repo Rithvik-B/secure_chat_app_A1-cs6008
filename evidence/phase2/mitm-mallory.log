@@ -1,0 +1,10 @@
+[2026-09-04T05:57:39Z] MITM proxy up on 10.10.0.13:5555 -> 10.10.0.10:5555
+[2026-09-04T05:57:41Z] victim connected from 10.10.0.11:36722
+[2026-09-04T05:57:41Z] two sessions established -- victim-side fp=cfbb2a3efc76a443  server-side fp=6d7bdab001012959
+[2026-09-04T05:57:41Z] [C->S] LOGIN alice
+[2026-09-04T05:57:41Z] [S->C] OK alice
+[2026-09-04T05:57:43Z] [C->S] MSG bob this channel feels private to us
+[2026-09-04T05:57:47Z] [S->C] FROM bob agreed, looks perfectly secure
+[2026-09-04T05:57:47Z] [C->S] MSG bob mallory is reading every word
+[2026-09-04T05:57:51Z] [C->S] QUIT
+[2026-09-04T05:57:51Z] victim disconnected

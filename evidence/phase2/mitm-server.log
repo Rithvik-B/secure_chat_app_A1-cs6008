@@ -1,0 +1,15 @@
+[2026-09-04T05:57:37Z] START phase2 DH + AES-256-GCM relay on 0.0.0.0:5555 (log: mitm-server.log)
+[2026-09-04T05:57:41Z] CONN  10.10.0.12:58210
+[2026-09-04T05:57:41Z] KEX   10.10.0.12:58210 session established, fingerprint=ac8c4dd18a4e310e
+[2026-09-04T05:57:41Z] LOGIN bob from 10.10.0.12:58210
+[2026-09-04T05:57:41Z] CONN  10.10.0.13:57834
+[2026-09-04T05:57:41Z] KEX   10.10.0.13:57834 session established, fingerprint=6d7bdab001012959
+[2026-09-04T05:57:41Z] LOGIN alice from 10.10.0.13:57834
+[2026-09-04T05:57:43Z] RELAY alice -> bob : "this channel feels private to us"
+[2026-09-04T05:57:47Z] RELAY bob -> alice : "agreed, looks perfectly secure"
+[2026-09-04T05:57:47Z] RELAY alice -> bob : "mallory is reading every word"
+[2026-09-04T05:57:51Z] QUIT  alice
+[2026-09-04T05:57:51Z] CLOSE alice (quit)
+[2026-09-04T05:57:52Z] QUIT  bob
+[2026-09-04T05:57:52Z] CLOSE bob (quit)
+[2026-09-04T05:58:17Z] STOP  shutting down

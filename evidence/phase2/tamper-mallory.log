@@ -1,0 +1,8 @@
+[2026-09-04T05:58:36Z] MITM proxy up on 10.10.0.13:5555 -> 10.10.0.10:5555  [tamper armed]
+[2026-09-04T05:58:39Z] victim connected from 10.10.0.11:49542
+[2026-09-04T05:58:39Z] two sessions established -- victim-side fp=04e3daf12049c5a7  server-side fp=85e910a7d2c52435
+[2026-09-04T05:58:39Z] [C->S] LOGIN alice
+[2026-09-04T05:58:39Z] [S->C] OK alice
+[2026-09-04T05:58:41Z] [C->S] MSG bob this record will be corrupted in flight
+[2026-09-04T05:58:41Z] [C->S] TAMPERED one byte of the next record
+[2026-09-04T05:58:41Z] victim disconnected

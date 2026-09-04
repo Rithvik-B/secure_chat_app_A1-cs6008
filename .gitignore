@@ -6,6 +6,7 @@ infra/
 phase*/server
 phase*/client
 phase*/mitm
+phase*/selftest
 
 # runtime output produced on the VMs
 phase*/*.log

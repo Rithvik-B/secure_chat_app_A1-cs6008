@@ -9,6 +9,7 @@
 \usepackage{microtype}                    % subtle spacing/protrusion; big legibility win
 
 %------------------------------------------------------------------- structure
+\usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{array}
@@ -21,7 +22,7 @@
 \usepackage{tcolorbox}
 \usepackage[hidelinks]{hyperref}
 
-\graphicspath{{../evidence/phase1/}{../evidence/phase0/}}
+\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase0/}}
 
 %---------------------------------------------------------------------- colour
 \definecolor{accent}{HTML}{1F4E79}        % deep blue, used for headings and rules
@@ -46,7 +47,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\footnotesize\sffamily\color{accent}CS6008 --- Secure Chat Application}
-\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--1}
+\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--2}
 \fancyfoot[C]{\footnotesize\sffamily\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\headrule}{\hbox to\headwidth{\color{accentlt}\leaders\hrule height \headrulewidth\hfill}}
@@ -100,7 +101,8 @@
 {\sffamily\Large\bfseries\color{accent} CS6008 --- Network Security}\\[10pt]
 {\sffamily\huge\bfseries Building a Secure Chat Application}\\[12pt]
 {\sffamily\large Phase 0 --- Deployment Environment\\[2pt]
- Phase 1 --- Baseline Chat Application}\\[10pt]
+ Phase 1 --- Baseline Chat Application\\[2pt]
+ Phase 2 --- Confidentiality via Diffie--Hellman}\\[10pt]
 {\color{accentlt}\rule{\textwidth}{1.2pt}}
 
 \vspace{1.6cm}
@@ -109,16 +111,19 @@
 \small
 \noindent
 A one-to-one chat application over TCP sockets, to be hardened across five phases. This report covers
-the deployment environment and the baseline plaintext application together with its verification.
+the deployment environment, the baseline plaintext application, and confidentiality via
+Diffie--Hellman, each with its verification.
 
 \medskip
 \noindent
-Four virtual machines were provisioned on an isolated virtual network and connectivity verified
-before any application code was run. The application is written in C++17 over POSIX sockets, with a
+Four virtual machines were provisioned on an isolated virtual network and connectivity verified before
+any application code was run. The application is written in C++17 over POSIX sockets, with a
 length-prefixed record protocol chosen so that the framing remains valid once message bodies stop
-being printable text. Phase~1 deliberately provides no confidentiality: the server logs the full
-content of every message it relays, and a packet capture taken on the network segment shows the
-entire conversation in cleartext. That is the baseline the remaining phases must dismantle.
+being printable text. Phase~1 deliberately provides no confidentiality: the server logs every message
+and a packet capture shows the whole conversation in cleartext. Phase~2 closes that gap with a
+Diffie--Hellman key exchange written from first principles and AES-256-GCM record encryption, then
+demonstrates a man-in-the-middle proxy defeating it --- motivating the authentication added in later
+phases. No TLS library is used anywhere.
 \end{minipage}
 
 \vfill
@@ -137,9 +142,10 @@ entire conversation in cleartext. That is the baseline the remaining phases must
 %======================================================================
 \section{Introduction}
 
-This report documents the first stage of a one-to-one chat application built over TCP sockets and
-progressively hardened across five phases. It covers the deployment environment (Phase~0) and the
-baseline plaintext chat application together with its verification (Phase~1).
+This report documents the first stages of a one-to-one chat application built over TCP sockets and
+progressively hardened across five phases. It covers the deployment environment (Phase~0), the
+baseline plaintext chat application (Phase~1), and confidentiality via Diffie--Hellman with a
+man-in-the-middle attack against it (Phase~2), each with its verification.
 
 The application is written in C++17 using POSIX sockets only. No TLS/SSL library is used anywhere:
 \texttt{<openssl/ssl.h>} and \texttt{<openssl/dh.h>} are excluded by design, as required. Phase~1
@@ -597,10 +603,166 @@ Protocol description: framing, message completeness, routing & Done \\
 \end{center}
 
 %======================================================================
+\section{Phase 2 --- Confidentiality via Diffie--Hellman}
+
+\begin{keybox}
+\textbf{What changed since Phase 1.} A Diffie--Hellman handshake now runs before any application data,
+and every record after it is encrypted with AES-256-GCM; the login itself travels encrypted. The
+record framing, the \texttt{LOGIN}/\texttt{MSG}/\texttt{WHO} grammar, and the server's routing are
+\emph{unchanged} --- the server simply decrypts inbound records and re-encrypts outbound ones. A
+man-in-the-middle proxy is added to attack the result.
+\end{keybox}
+
+\subsection{Requirements}
+
+Phase~2 requires a Diffie--Hellman key exchange implemented from first principles (a standard
+published group, with the modular exponentiation written by hand --- no library DH), an AES key
+derived from the shared secret by hashing rather than using it raw, authenticated encryption on all
+traffic, a printed fingerprint of the secret on both ends, and a demonstration that the traffic is no
+longer readable and that tampering is detected. It also requires a separate man-in-the-middle proxy
+that performs two independent exchanges and reads everything.
+
+\subsection{Diffie--Hellman from first principles}
+
+The group is RFC~3526 group~14: a standard, published 2048-bit MODP group with generator $g = 2$,
+whose modulus is a safe prime (both $p$ and $(p-1)/2$ are prime). Each side picks a 256-bit private
+exponent $x$ and sends $g^{x} \bmod p$; each then computes the shared secret $Z = (\text{peer})^{x}
+\bmod p$.
+
+The modular exponentiation is written by hand as \emph{square-and-multiply}, reducing modulo $p$ at
+every step. Reducing at each step is not an optimisation but a necessity: with a 2048-bit modulus and
+a 256-bit exponent, computing $g^{x}$ before reducing would require an integer with more digits than
+there are atoms in the observable universe. OpenSSL's big-integer type is used only as an arithmetic
+primitive (\texttt{BN\_mod\_mul}); \texttt{BN\_mod\_exp} and the entire DH API are deliberately
+avoided, as the assignment requires. A received public value is rejected unless $1 < y < p-1$, which
+prevents a peer from forcing the secret to a value it chooses. A self-test (\texttt{selftest.txt})
+confirms the group is a 2048-bit safe prime and that the hand-written exponentiation agrees with
+OpenSSL's reference on a range of inputs.
+
+\subsection{Why the shared secret is hashed}
+
+The raw secret $Z$ is \emph{not} used as the AES key. $Z$ is a 2048-bit element of a mathematical
+group: its size is wrong for AES-256 (which needs exactly 32 bytes), and its bits are not uniformly
+distributed --- some values are structurally more likely, and there are known relationships among the
+bits of a modular-exponentiation result. Keying AES with such biased material is unsound. A
+cryptographic hash fixes both problems at once: SHA-256 outputs exactly 32 bytes and maps the biased
+input to an output indistinguishable from random. Hashing also lets a label and the handshake
+transcript be folded in, so the single secret yields several independent values that cannot be
+confused with or derived from one another:
+\begin{center}\small\ttfamily
+K\_c2s = SHA256("CS6008-P2-KEY|c2s|" $\Vert$ Z $\Vert$ TH), \quad
+K\_s2c = SHA256("...|s2c|" ...), \quad
+FP = SHA256("CS6008-P2-FP|" ...)[0..7]
+\end{center}
+The two directional keys prevent a record the server sent from being replayed back at it as though the
+client had sent it. The fingerprint \texttt{FP} uses a \emph{different} label from the keys, so it can
+be printed safely; the raw secret and the keys themselves are never printed.
+
+\subsection{Record encryption}
+
+After the handshake, each \texttt{REC\_APPDATA} body is $\text{ciphertext} \Vert \text{tag}$ under
+AES-256-GCM. Neither an IV nor a sequence number is transmitted: the nonce is
+$\text{salt}(4) \Vert \text{seq}(8)$ where \texttt{seq} is an implicit per-direction counter each side
+maintains independently. TCP delivers records in order, so the counters stay in lockstep; any drop,
+duplication, reorder, or injection desynchronises them, the tag fails, and the connection aborts. A
+monotonic counter also guarantees the nonce never repeats under one key, which GCM requires.
+
+\subsection{Verification}
+
+\paragraph{Matching fingerprints, secret never printed.} Each client prints the fingerprint of its
+derived secret, and it equals the one the server logs for that connection; the two clients differ, as
+each runs its own exchange (\texttt{chat-transcript.md}):
+
+\begin{lstlisting}
+alice(C1) | key exchange complete, shared-secret fingerprint f5b73958da76b903
+SERVER    | KEX ... fingerprint=f5b73958da76b903     <- matches alice
+bob(C2)   | key exchange complete, shared-secret fingerprint ef643199d65ce813
+SERVER    | KEX ... fingerprint=ef643199d65ce813     <- matches bob
+\end{lstlisting}
+
+\paragraph{Traffic is unreadable.} The Phase~1 capture was repeated on the encrypted protocol
+(\texttt{chat.pcap}). Every chat word from the session was searched across all frames and found in
+none. Figure~\ref{fig:p2packet} shows a chat record's bytes as AES-GCM ciphertext where Phase~1
+(Figure~\ref{fig:packets}) showed readable ASCII; Figure~\ref{fig:p2follow} shows Follow $\rightarrow$ TCP
+Stream unreadable where Phase~1 (Figure~\ref{fig:follow}) showed the whole conversation.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{wireshark-packet-ciphertext.png}
+\caption{Phase 2, \texttt{chat.pcap}, frame 16 (a chat record). The bytes pane is AES-GCM ciphertext
+with an unreadable ASCII column --- contrast Figure~\ref{fig:packets}, the same view in Phase 1
+showing \texttt{MSG bob hey bob, are you there?} in cleartext.}
+\label{fig:p2packet}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{wireshark-follow-tcp-stream.png}
+\caption{Phase 2, Follow~$\rightarrow$~TCP Stream. Client data in red, server in blue --- all
+unreadable, except the two Diffie--Hellman public values (which are meant to be public). Contrast
+Figure~\ref{fig:follow}, the same view in Phase 1 with every line legible.}
+\label{fig:p2follow}
+\end{figure}
+
+\paragraph{Tampering is rejected.} With the proxy's \texttt{-{}-tamper} flag flipping one byte of a
+chat record, the login (untampered) is accepted but the corrupted record fails its GCM tag; the server
+logs the message \texttt{AES-GCM authentication failed} and closes the connection
+(\texttt{tamper-transcript.md}). A single flipped byte is a hard failure, never silent corruption.
+
+\subsection{Attack --- man-in-the-middle}
+
+Diffie--Hellman agrees a key with whoever answers the connection; it never checks who that is. The
+proxy (\texttt{mitm.cpp}) exploits this: pointed at by the victim, it runs one exchange as the server
+toward the victim and a second as a client toward the real server, holding both keys.
+
+\begin{lstlisting}
+victim  <-- DH: session V -->  MALLORY  <-- DH: session S -->  real server
+\end{lstlisting}
+
+With \texttt{alice} pointed at the proxy (\texttt{./client 10.10.0.13 alice}) and \texttt{bob} at the
+real server, Mallory read and logged every message in plaintext while alice's client reported a normal,
+completed, encrypted session (\texttt{mitm-transcript.md}):
+
+\begin{lstlisting}
+MALLORY | two sessions established -- victim-side fp=cfbb2a3e...  server-side fp=6d7bdab0...
+MALLORY | [C->S] MSG bob this channel feels private to us
+MALLORY | [C->S] MSG bob mallory is reading every word
+\end{lstlisting}
+
+\paragraph{Detectable evidence, and why a user misses it.} The evidence is the fingerprints. Alice
+computed \texttt{cfbb2a3e...} for her session with Mallory, while the real server computed
+\texttt{6d7bdab0...} for its session with Mallory --- two different secrets. Had alice and bob compared
+fingerprints over an independent channel, the mismatch would have exposed that neither was talking
+directly to the other. An ordinary user misses this because unauthenticated Diffie--Hellman gives no
+automatic signal: both ends see a normal handshake and a working encrypted session, and the only tell
+is a manual, out-of-band comparison that users never perform. This is exactly the gap Phase~3 closes.
+
+\subsection{Deliverables checklist}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} \\
+\midrule
+DH from scratch, standard published group, hand-written modular exponentiation & Done \\
+AES key derived from the DH secret by hashing, not used raw & Done \\
+Authenticated encryption (AES-GCM) on all traffic, login included & Done \\
+Both ends print matching fingerprints; raw secret/key never printed & Done \\
+Wireshark shows the traffic is no longer readable (before/after) & Done \\
+Tampering with a ciphertext byte is rejected, not silently accepted & Done \\
+MITM proxy with two independent DH exchanges reads all traffic & Done \\
+Explanation: detectable evidence of the MITM and why a user misses it & Done \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%======================================================================
 \section{Building and Running}
 
 \begin{lstlisting}
-cd phase1 && make            # builds ./server and ./client
+cd phaseN && make            # phase1: server, client. phase2: + mitm, selftest
+make test                    # phase2: run the crypto self-test
 
 # on vm1-server (10.10.0.10)
 ./server --log server.log
@@ -608,6 +770,9 @@ cd phase1 && make            # builds ./server and ./client
 # on vm2-client1 / vm3-client2
 ./client 10.10.0.10 alice
 ./client 10.10.0.10 bob
+
+# phase 2 MITM: on vm4-mallory, then point the victim at 10.10.0.13
+./mitm --listen 10.10.0.13 --server 10.10.0.10 --log mallory.log [--tamper]
 
 # packet capture, on any VM
 sudo tshark -i enp0s8 -f 'tcp port 5555' -w /tmp/cap.pcap
@@ -621,10 +786,11 @@ files stored under \texttt{/home}.
 %======================================================================
 \section{Next Phase}
 
-Phase~2 adds confidentiality between each client and the server. The record framing, application
-grammar and routing logic described here are expected to carry over unchanged, with the work confined
-to the record body. The captures above will be repeated on the new protocol so that the two can be
-compared directly at the same offsets.
+Phase~2 established confidentiality but not authentication: the man-in-the-middle attack succeeds
+because Diffie--Hellman agrees a key with whoever answers. Phase~3 adds a Public Key Infrastructure ---
+a Certificate Authority, a server certificate, and a proof that the server holds the matching private
+key --- so the client can verify it is talking to the real server before the exchange proceeds. The
+same MITM proxy will then be re-run to show it can no longer succeed.
 
 %======================================================================
 \appendix

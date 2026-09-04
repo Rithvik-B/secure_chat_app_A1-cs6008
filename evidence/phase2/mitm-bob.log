@@ -1,0 +1,10 @@
+05:57:41 key exchange complete, shared-secret fingerprint ac8c4dd18a4e310e
+05:57:41 connected to 10.10.0.10:5555 as bob
+05:57:41 commands: @user message | /chat user | /who | /quit
+05:57:41 ----------------------------------------------------
+05:57:41 * alice joined
+05:57:43 alice> this channel feels private to us
+05:57:47 you -> alice: agreed, looks perfectly secure
+05:57:47 alice> mallory is reading every word
+05:57:51 * alice left
+05:57:52 * bye

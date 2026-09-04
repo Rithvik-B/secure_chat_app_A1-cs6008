@@ -1,0 +1,12 @@
+[2026-09-04T05:58:35Z] START phase2 DH + AES-256-GCM relay on 0.0.0.0:5555 (log: tamper-server.log)
+[2026-09-04T05:58:39Z] CONN  10.10.0.12:41698
+[2026-09-04T05:58:39Z] KEX   10.10.0.12:41698 session established, fingerprint=b68011127c7038cc
+[2026-09-04T05:58:39Z] LOGIN bob from 10.10.0.12:41698
+[2026-09-04T05:58:39Z] CONN  10.10.0.13:37774
+[2026-09-04T05:58:39Z] KEX   10.10.0.13:37774 session established, fingerprint=85e910a7d2c52435
+[2026-09-04T05:58:39Z] LOGIN alice from 10.10.0.13:37774
+[2026-09-04T05:58:41Z] DROP  alice : AES-GCM authentication failed, record rejected
+[2026-09-04T05:58:41Z] CLOSE alice (peer closed)
+[2026-09-04T05:58:47Z] QUIT  bob
+[2026-09-04T05:58:47Z] CLOSE bob (quit)
+[2026-09-04T05:59:10Z] STOP  shutting down

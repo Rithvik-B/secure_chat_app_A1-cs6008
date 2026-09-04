@@ -1,0 +1,6 @@
+05:58:39 key exchange complete, shared-secret fingerprint 04e3daf12049c5a7
+05:58:39 connected to 10.10.0.13:5555 as alice
+05:58:39 commands: @user message | /chat user | /who | /quit
+05:58:39 ----------------------------------------------------
+05:58:41 you -> bob: this record will be corrupted in flight
+05:58:41 * server closed the connection

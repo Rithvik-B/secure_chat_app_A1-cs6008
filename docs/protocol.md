@@ -3,12 +3,12 @@
 Wire protocol for the CS6008 secure chat application.
 
 This document describes the protocol **as currently implemented**. It grows with each phase; right
-now it covers Phase 1, which carries chat traffic in plaintext with no cryptography at all.
+now it covers Phases 1 and 2.
 
 | Phase | Status | Adds |
 |---|---|---|
 | 1 | implemented | Record framing, application grammar, username routing |
-| 2 | not started | Key exchange and record encryption |
+| 2 | implemented | Diffie-Hellman key exchange, AES-256-GCM record encryption |
 | 3 | not started | Server authentication |
 | 4 | not started | End-to-end encryption between clients |
 | 5 | not started | Key rotation |
@@ -19,8 +19,12 @@ now it covers Phase 1, which carries chat traffic in plaintext with no cryptogra
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ L2  Application grammar   LOGIN / MSG / WHO / QUIT        │
+│ L4  Application grammar   LOGIN / MSG / WHO / QUIT        │
 │                           OK / ERR / FROM / USERS / INFO  │
+├──────────────────────────────────────────────────────────┤
+│ L3  Record encryption     AES-256-GCM  (Phase 2)          │
+├──────────────────────────────────────────────────────────┤
+│ L2  Handshake             Diffie-Hellman  (Phase 2)       │
 ├──────────────────────────────────────────────────────────┤
 │ L1  Record framing        [len:4][type:1][body]           │
 ├──────────────────────────────────────────────────────────┤
@@ -28,8 +32,10 @@ now it covers Phase 1, which carries chat traffic in plaintext with no cryptogra
 └──────────────────────────────────────────────────────────┘
 ```
 
-The split matters: L1 knows nothing about chat, and L2 knows nothing about how bytes are delimited.
-Later phases add processing between the two without either layer changing.
+L1 knows nothing about chat and L4 knows nothing about how bytes are delimited or encrypted. Phase 2
+inserted L2 and L3 between them without changing either: the application grammar and the framing are
+exactly as they were in Phase 1. L3 sits *below* the grammar, so `LOGIN`, `MSG`, `WHO` and their
+replies are all encrypted — the username never travels in the clear.
 
 ---
 
@@ -49,12 +55,14 @@ Every record, in both directions:
 
 | `type` | Name | Meaning |
 |---|---|---|
-| `0x01` | `REC_HANDSHAKE` | reserved, unused in Phase 1 |
-| `0x02` | `REC_APPDATA` | application data — the only type Phase 1 emits |
-| `0x03` | `REC_ALERT` | reserved, unused in Phase 1 |
+| `0x01` | `REC_HANDSHAKE` | key-exchange message, always plaintext |
+| `0x02` | `REC_APPDATA` | application data — AES-256-GCM once the handshake completes |
+| `0x03` | `REC_ALERT` | abort reason, plaintext by necessity |
 
-Two codes are reserved rather than assigned on demand later, so that adding record kinds never
-requires a version bump or a change to existing parsers.
+Whether a `REC_APPDATA` body is plaintext or ciphertext is decided by connection state, not by the
+record: before the handshake finishes there is no key, so the body is plaintext; after it, every body
+is a GCM record. Alerts are plaintext because they are sent only while tearing a session down, often
+before any key exists.
 
 ### Limits
 
@@ -99,9 +107,112 @@ round-trips byte-exactly.
 
 ---
 
-# L2 — Application grammar
+# L2 — Handshake (Phase 2)
 
-The body of a `REC_APPDATA` record is a single UTF-8 line: a verb, then space-separated arguments.
+Runs immediately after TCP connect, before any application data. Its job is to agree a shared secret
+that an eavesdropper cannot compute, using Diffie-Hellman.
+
+A handshake record (`REC_HANDSHAKE`) carries a one-byte sub-type followed by its payload. Variable
+fields are `uint16` big-endian length-prefixed.
+
+| Sub-type | Name | Direction | Body |
+|---|---|---|---|
+| `0x01` | `HS_CLIENT_HELLO` | C → S | `[version:1][client_random:32]` |
+| `0x02` | `HS_SERVER_KEX` | S → C | `[version:1][dh_pub_len:2][dh_pub]` |
+| `0x05` | `HS_CLIENT_KEX` | C → S | `[dh_pub_len:2][dh_pub]` |
+
+```
+C → S   HS_CLIENT_HELLO {version, client_random}
+S → C   HS_SERVER_KEX   {version, server_pub}
+C → S   HS_CLIENT_KEX   {client_pub}
+        both sides compute Z = peer_pub^own_priv mod p, derive keys, print fingerprint
+```
+
+`HS_CLIENT_HELLO` **carries no DH value** — only a 32-byte random nonce. The client contributes its
+public value in `HS_CLIENT_KEX`, after it has received the server's message. In Phase 2 that gap does
+nothing useful yet, but Phase 3 inserts certificate validation between the two, and the client must
+be able to abort *before* it has committed to the exchange. The nonce exists for the same reason: in
+Phase 3 the server signs it, which is what makes a captured signature useless in any later session.
+
+### The Diffie-Hellman group
+
+RFC 3526 group 14: a standard, published 2048-bit MODP group with generator `g = 2`. The modulus is a
+safe prime (both `p` and `(p-1)/2` are prime), verified in the self-test. The private exponent is 256
+random bits.
+
+The modular exponentiation `g^x mod p` is **implemented by hand**, as square-and-multiply, reducing
+modulo `p` at every step. Computing `g^x` first and reducing afterwards is impossible: with a
+2048-bit modulus and a 256-bit exponent the intermediate would have more digits than there are atoms
+in the observable universe. OpenSSL's big-integer type is used only as an arithmetic primitive
+(`BN_mod_mul`); `BN_mod_exp` and the whole DH API are avoided.
+
+A received peer value is rejected unless `1 < y < p-1`. Without that check a peer could send `0`, `1`
+or `p-1` and force the shared secret to a value it chooses.
+
+### Key derivation
+
+Let `Z` be the shared secret, big-endian, **left-padded to 256 bytes**. The padding matters: a `Z`
+that happens to have a leading zero byte would otherwise serialise one byte shorter on one side than
+the other, and the two ends would derive different keys roughly one time in 256.
+
+```
+TH    = SHA-256( version || client_random || server_pub || client_pub )
+
+K_c2s = SHA-256( "CS6008-P2-KEY|c2s|" || Z || TH )   // client -> server
+K_s2c = SHA-256( "CS6008-P2-KEY|s2c|" || Z || TH )   // server -> client
+salt  = SHA-256( "CS6008-P2-SALT|"    || Z || TH )[0..3]
+FP    = SHA-256( "CS6008-P2-FP|"      || Z || TH )[0..7]   // printable fingerprint
+```
+
+- **`Z` is never used directly as a key.** It is a biased element of a large group, not a uniform
+  256-bit string; a cryptographic hash both fixes the size and removes the bias. This is why the DH
+  secret is hashed rather than truncated.
+- **Separate keys per direction** stop a record the server sent from being replayed back at it as
+  though the client had sent it.
+- **The transcript hash `TH` is folded in**, so that tampering with any handshake field makes the two
+  sides derive different keys — the very first encrypted record then fails its tag and the connection
+  dies, rather than proceeding on mismatched keys.
+- **The fingerprint uses a different label** from the keys, so it can be printed for the
+  matching-fingerprint check without revealing anything about the keys. Both ends print `FP`; a real
+  session sees them match. `Z` and the keys themselves are never printed.
+
+---
+
+# L3 — Record encryption (Phase 2)
+
+Once the handshake completes, every `REC_APPDATA` body is:
+
+```
+ 0                              N            N+16
+ ├──────────────────────────────┼─────────────┤
+ │        ciphertext            │  tag (16)   │
+ └──────────────────────────────┴─────────────┘
+```
+
+AES-256-GCM. Note what is **not** on the wire: no IV and no sequence number.
+
+```
+seq    : uint64, starts at 0, a separate counter per direction
+nonce  : salt(4) || seq(8, big-endian)   = 12 bytes
+AAD    : seq(8, big-endian)
+key    : K_c2s or K_s2c, by direction
+```
+
+Each side counts its own records, so the sequence number is implicit — nothing is transmitted. TCP
+delivers records in order, so the two counters stay in lockstep. If a record is dropped, duplicated,
+reordered or injected, the counters diverge, the GCM tag fails, and the connection aborts. That
+failure *is* the tamper detection: a single flipped byte makes decryption fail rather than produce
+corrupted plaintext, and the corrupted record is never processed.
+
+**A nonce is never reused under one key.** GCM nonce reuse leaks the XOR of two plaintexts and lets an
+attacker forge tags; a monotonic counter makes reuse structurally impossible, where a random 96-bit
+nonce would eventually collide.
+
+---
+
+# L4 — Application grammar
+
+The body of an application record — the GCM *plaintext* from Phase 2 on — is a single UTF-8 line: a verb, then space-separated arguments.
 No trailing newline — the record boundary is the message boundary.
 
 ### Client → Server
@@ -257,14 +368,25 @@ Evidence in [`../evidence/phase1/`](../evidence/phase1/).
 # Constants
 
 ```c
-#define PROTO_VERSION   0x01
-#define CHAT_PORT       5555
+#define PROTO_VERSION      0x02
+#define CHAT_PORT          5555
 
-#define MAX_RECORD      16384
-#define MAX_PLAINTEXT   8192
-#define MAX_USERNAME    32
+#define MAX_RECORD         16384
+#define MAX_PLAINTEXT      8192
+#define MAX_USERNAME       32
 
-#define REC_HANDSHAKE   0x01    // reserved
-#define REC_APPDATA     0x02
-#define REC_ALERT       0x03    // reserved
+#define REC_HANDSHAKE      0x01
+#define REC_APPDATA        0x02
+#define REC_ALERT          0x03
+
+#define HS_CLIENT_HELLO    0x01
+#define HS_SERVER_KEX      0x02
+#define HS_CLIENT_KEX      0x05
+#define CLIENT_RANDOM_LEN  32
+
+// crypto
+#define DH_MODULUS_BYTES   256   // RFC 3526 group 14, 2048-bit
+#define AES_KEY_LEN        32
+#define GCM_NONCE_LEN      12
+#define GCM_TAG_LEN        16
 ```

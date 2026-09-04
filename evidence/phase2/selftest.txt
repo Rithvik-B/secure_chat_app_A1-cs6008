@@ -1,0 +1,16 @@
+DH group
+  [PASS] prime is 2048 bits
+  [PASS] modulus is prime
+  [PASS] (p-1)/2 is prime (safe prime)
+  [PASS] generator is 2
+hand-written modular exponentiation vs OpenSSL reference
+  [PASS] 2^e mod p matches for a range of exponents
+full key agreement
+  [PASS] two key pairs derive the identical shared secret
+  [PASS] peer value 0 is rejected
+AES-256-GCM
+  [PASS] seal then open round-trips
+  [PASS] any single-byte modification is rejected
+  [PASS] a record replayed at the wrong position is rejected
+
+ALL TESTS PASSED

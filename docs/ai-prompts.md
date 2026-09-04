@@ -68,3 +68,9 @@ and the supporting documentation. No application code in this phase.
 # Phase 1 — Baseline Chat Application
 
 12. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protol.md, phase1/README.md and add comments in all the code files to help readers understand the implementations, I have kept server.pcap, server.log, c1.pcap, c2.pcap in evidence/phase1 along with screenshots of wiresharks, write report until this phase0 and phase1 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
+
+---
+
+# Phase 2 — Client–Server Confidentiality
+
+13. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protol.md, phase2/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase2/`: the self-test, matching-fingerprint logs, a ciphertext capture with Wireshark screenshots, Mallory's captured plaintext with mismatched fingerprints, and the tamper-rejection logs, write report until this phase2 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
