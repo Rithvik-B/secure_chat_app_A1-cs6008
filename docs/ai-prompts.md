@@ -67,4 +67,4 @@ and the supporting documentation. No application code in this phase.
 
 # Phase 1 — Baseline Chat Application
 
-*(Filled in as Phase 1 work proceeds.)*
+12. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protol.md, phase1/README.md and add comments in all the code files to help readers understand the implementations, I have kept server.pcap, server.log, c1.pcap, c2.pcap in evidence/phase1 along with screenshots of wiresharks, write report until this phase0 and phase1 as described in assignement linking all of these in report/main.tex final report at report.pdf"*

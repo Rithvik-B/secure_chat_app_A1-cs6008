@@ -1,0 +1,17 @@
+[2026-09-04T00:54:46Z] START phase1 plaintext relay on 0.0.0.0:5555 (log: server.log)
+[2026-09-04T00:54:52Z] CONN  10.10.0.11:58172
+[2026-09-04T00:54:52Z] LOGIN alice from 10.10.0.11:58172
+[2026-09-04T00:54:52Z] CONN  10.10.0.12:42680
+[2026-09-04T00:54:52Z] LOGIN bob from 10.10.0.12:42680
+[2026-09-04T00:54:54Z] WHO   alice -> [alice bob]
+[2026-09-04T00:54:56Z] RELAY alice -> bob : "hey bob, are you there?"
+[2026-09-04T00:54:58Z] RELAY bob -> alice : "yes alice, receiving you loud and clear"
+[2026-09-04T00:55:00Z] RELAY alice -> bob : "this line goes to the selected partner"
+[2026-09-04T00:55:02Z] RELAY bob -> alice : "the server can read every word of this"
+[2026-09-04T00:55:05Z] RELAY alice -> bob : "plaintext is fully readable on the wire"
+[2026-09-04T00:55:08Z] WHO   bob -> [alice bob]
+[2026-09-04T00:55:09Z] QUIT  alice
+[2026-09-04T00:55:09Z] CLOSE alice (quit)
+[2026-09-04T00:55:10Z] QUIT  bob
+[2026-09-04T00:55:10Z] CLOSE bob (quit)
+[2026-09-04T00:55:36Z] STOP  shutting down

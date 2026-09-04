@@ -1,7 +1,29 @@
 # setup docs (notes and commands) I used while configuring VMS
 infra/
 
+# compiled output — rebuilt on each VM, never committed
+*.o
+phase*/server
+phase*/client
+phase*/mitm
+
+# runtime output produced on the VMs
+phase*/*.log
+
+# private keys must NEVER be committed
+*.key
+phase3/pki/private/
+
 # editor / OS noise
 .vscode/
 *.swp
 .DS_Store
+
+# LaTeX build artifacts (keep main.tex and report.pdf)
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.fls
+report/*.fdb_latexmk
+report/*.synctex.gz

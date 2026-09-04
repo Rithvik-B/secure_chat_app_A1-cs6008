@@ -18,5 +18,8 @@ shift
 tty_flag=()
 [[ "${*:-}" == *sudo* ]] && tty_flag=(-t)
 
-exec ssh "${tty_flag[@]}" -o StrictHostKeyChecking=accept-new \
+exec ssh "${tty_flag[@]}" \
+     -o StrictHostKeyChecking=accept-new \
+     -o IdentityFile="$HOME/.ssh/id_securechat" \
+     -o IdentitiesOnly=yes \
      -p "$port" "$user@127.0.0.1" "$@"
