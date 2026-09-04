@@ -22,7 +22,7 @@
 \usepackage{tcolorbox}
 \usepackage[hidelinks]{hyperref}
 
-\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase3/}{../evidence/phase4/}{../evidence/phase0/}}
+\graphicspath{{../evidence/phase1/}{../evidence/phase2/}{../evidence/phase3/}{../evidence/phase4/}{../evidence/phase5/}{../evidence/phase0/}}
 
 %---------------------------------------------------------------------- colour
 \definecolor{accent}{HTML}{1F4E79}        % deep blue, used for headings and rules
@@ -47,7 +47,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\footnotesize\sffamily\color{accent}CS6008 --- Secure Chat Application}
-\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--4}
+\fancyhead[R]{\footnotesize\sffamily\color{accent}Phases 0--5}
 \fancyfoot[C]{\footnotesize\sffamily\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\headrule}{\hbox to\headwidth{\color{accentlt}\leaders\hrule height \headrulewidth\hfill}}
@@ -104,7 +104,8 @@
  Phase 1 --- Baseline Chat Application\\[2pt]
  Phase 2 --- Confidentiality via Diffie--Hellman\\[2pt]
  Phase 3 --- Server Authentication via PKI\\[2pt]
- Phase 4 --- End-to-End Encryption Between Clients}\\[10pt]
+ Phase 4 --- End-to-End Encryption Between Clients\\[2pt]
+ Phase 5 --- Forward Secrecy via Key Rotation}\\[10pt]
 {\color{accentlt}\rule{\textwidth}{1.2pt}}
 
 \vspace{1.6cm}
@@ -112,10 +113,10 @@
 \begin{minipage}{0.86\textwidth}
 \small
 \noindent
-A one-to-one chat application over TCP sockets, to be hardened across five phases. This report covers
+A one-to-one chat application over TCP sockets, hardened across five phases. This report covers
 the deployment environment, the baseline plaintext application, confidentiality via Diffie--Hellman,
-server authentication via a PKI, and end-to-end encryption between the two clients, each with its
-verification.
+server authentication via a PKI, end-to-end encryption between the two clients, and forward secrecy via key rotation, each
+with its verification.
 
 \medskip
 \noindent
@@ -129,7 +130,9 @@ demonstrates a man-in-the-middle proxy defeating it. Phase~3 adds a Public Key I
 Certificate Authority, a server certificate, and a proof of possession --- so the client authenticates
 the server and the same attack now fails. Phase~4 adds encryption directly between the two clients,
 riding inside the relay's message field, so the server forwards only opaque data it cannot read ---
-with no change to the server at all. No TLS library is used anywhere.
+with no change to the server at all. Phase~5 rotates that end-to-end key on a timer, each new key
+independent of the last, so a compromised key exposes only a bounded window. No TLS library is used
+anywhere.
 \end{minipage}
 
 \vfill
@@ -148,12 +151,12 @@ with no change to the server at all. No TLS library is used anywhere.
 %======================================================================
 \section{Introduction}
 
-This report documents the first stages of a one-to-one chat application built over TCP sockets and
-progressively hardened across five phases. It covers the deployment environment (Phase~0), the
+This report documents a one-to-one chat application built over TCP sockets and progressively hardened
+across five phases. It covers the deployment environment (Phase~0), the
 baseline plaintext chat application (Phase~1), confidentiality via Diffie--Hellman with a
 man-in-the-middle attack against it (Phase~2), server authentication via a PKI that defeats that
-attack (Phase~3), and end-to-end encryption between the clients (Phase~4), each with its
-verification.
+attack (Phase~3), end-to-end encryption between the clients (Phase~4), and forward secrecy via key rotation
+(Phase~5), each with its verification.
 
 The application is written in C++17 using POSIX sockets only. No TLS/SSL library is used anywhere:
 \texttt{<openssl/ssl.h>} and \texttt{<openssl/dh.h>} are excluded by design, as required. Phase~1
@@ -1027,6 +1030,103 @@ Handshake tags never shown as chat; chat never treated as handshake & Done \\
 \end{center}
 
 %======================================================================
+\section{Phase 5 --- Forward Secrecy via Key Rotation}
+
+\begin{keybox}
+\textbf{What changed since Phase 4.} The end-to-end key is now renegotiated every 60~s. Each new key
+comes from a fresh Diffie--Hellman, independent of the last, and the old key is discarded --- so a
+compromised key exposes only a bounded window of traffic. There is no wire-format change (the
+\texttt{epoch} field already existed), and \texttt{server.cpp} is still identical to Phase 3.
+\end{keybox}
+
+\subsection{Requirements}
+
+Phase~5 requires the end-to-end key to be renegotiated on a fixed timer while the session is active,
+each new key independent of the old and the old key discarded; simultaneous rotation attempts handled
+without the two sides diverging; chat uninterrupted across a rotation; at least two rotations logged
+with timestamps and fingerprints that change each time and match on both sides; and an explanation of
+what forward secrecy adds over Phase~4.
+
+\subsection{Design}
+
+A rotation is simply another \texttt{\_\_E2E\_INIT\_\_} / \texttt{\_\_E2E\_ACK\_\_} exchange for the
+next \texttt{epoch}, so no wire format changes. Each epoch's key is a fresh ephemeral Diffie--Hellman
+and is never derived from the previous key; the retiring key lingers for a short grace window
+(decrypt-only, $\sim$10~s) so a message in flight across a rotation still decrypts, and is then
+zeroised. Because every \texttt{\_\_E2E\_MSG\_\_} carries its epoch, the recipient always knows which
+key to use.
+
+\paragraph{Collision avoidance.} Only the \emph{initiator} --- the peer with the lexicographically
+smaller username --- starts a rotation, at 60~s; both sides compute the same initiator with no
+negotiation, since usernames are unique. The other peer holds a 75~s fallback and initiates only if
+the initiator has gone silent. Should both send an \texttt{\_\_E2E\_INIT\_\_} for the same epoch at
+once, the smaller username wins and the loser answers with an \texttt{\_\_E2E\_ACK\_\_}. This is
+deterministic, so the two sides can never settle on different keys --- confirmed by the self-test's
+``both sides agree on the fingerprint after each rotation''.
+
+\subsection{Verification}
+
+Both clients log each epoch's fingerprint with a timestamp (\texttt{fingerprint-timeline.md}). The
+interval was set to 20~s via \texttt{-{}-rekey~20} so two rotations complete within a short captured
+session; the default is 60~s.
+
+\begin{lstlisting}
+epoch  time (alice)  alice fingerprint   bob fingerprint     match
+0      07:22:40      edadeade4196261a    edadeade4196261a    yes
+1      07:23:01      d5b9d6fbd2bad80f    d5b9d6fbd2bad80f    yes
+2      07:23:21      0ab850ced4712d7f    0ab850ced4712d7f    yes
+\end{lstlisting}
+
+Two rotations: the fingerprint changes at each, and both clients agree after each rotation completes.
+Chat is not disrupted --- from \texttt{e2e-rekey-transcript.md}, messages sent before, across, and
+after each rotation are all delivered:
+
+\begin{lstlisting}
+07:22:43  alice -> bob [e2e]: epoch 0: forward secrecy demo    (epoch 0, decrypted by bob)
+07:23:01  E2E rekey -> epoch 1  ...
+07:23:01  alice -> bob [e2e]: after the first rotation         (epoch 1, decrypted by bob)
+07:23:03  bob   -> alice [e2e]: replying across a rekey        (epoch 1, decrypted by alice)
+07:23:21  E2E rekey -> epoch 2  ...
+07:23:21  alice -> bob [e2e]: after the second rotation        (epoch 2, decrypted by bob)
+\end{lstlisting}
+
+The message at 07:23:21 is sent in the same second as the rotation and decrypts correctly. The
+server's relay log stays opaque throughout, and the epoch counter is even visible in the base64
+(\texttt{\_\_E2E\_INIT\_\_} payloads begin \texttt{BQAAAAAB}, \texttt{BQAAAAEB}, \texttt{BQAAAAIB} for
+epochs 0, 1, 2).
+
+\subsection{What forward secrecy buys}
+
+In Phase~4 a single end-to-end key protects the whole session. An attacker who records the ciphertext
+and \emph{later} obtains that key --- by stealing it from a device after the fact, or through a future
+cryptographic break --- can decrypt \emph{every} message ever sent in that session. Phase~5 rotates
+the key every 60~s, each epoch keyed by a fresh ephemeral Diffie--Hellman whose private exponents are
+discarded after the exchange, and wipes the old key. Compromising one epoch's key now reveals only
+that $\sim$60~s window: earlier and later epochs used independent secrets that cannot be reconstructed
+from the leaked key. That is forward secrecy --- the guarantee that compromising a key \emph{now} does
+not retroactively expose traffic already protected by discarded keys. Phase~4 alone gives no such
+guarantee.
+
+\subsection{Deliverables checklist}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Requirement} & \textbf{Status} \\
+\midrule
+E2E key renegotiated on a fixed timer while the session is active & Done \\
+Each new key independent of the old; old key discarded & Done \\
+Simultaneous-rotation collisions handled without divergence & Done \\
+Chat uninterrupted across a rotation & Done \\
+$\geq$2 rotations logged with timestamps + fingerprints, changing and matching & Done \\
+A message sent immediately after a rotation is decrypted by the recipient & Done \\
+Explanation of what forward secrecy adds over Phase 4 & Done \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%======================================================================
 \section{Building and Running}
 
 \begin{lstlisting}
@@ -1043,7 +1143,8 @@ cd pki && ./make-ca.sh && ./make-server-cert.sh && ./make-attack-certs.sh
 # clients (10.10.0.11 / .12)  -- phase 3 needs --ca
 ./client 10.10.0.10 alice                                  # phase 1-2
 ./client 10.10.0.10 alice --ca certs/ca-cert.pem --expect chatserver.local  # phase 3-4
-#   phase 4: type "/e2e bob" in the client to start end-to-end with bob
+#   phase 4-5: type "/e2e bob" to start end-to-end; the key rotates every 60 s
+#   (add --rekey 20 to both clients to see rotations sooner)
 
 # MITM on vm4-mallory, then point the victim at 10.10.0.13
 ./mitm --listen 10.10.0.13 --server 10.10.0.10 --log mallory.log [--tamper]  # phase 2
@@ -1057,14 +1158,6 @@ Two environment notes recorded while capturing: \texttt{dumpcap} drops privilege
 through \texttt{sudo}, so \texttt{tshark -w} cannot write into a home directory and must target a
 world-writable path; and Ubuntu's AppArmor profile prevents \texttt{tshark -r} from reading capture
 files stored under \texttt{/home}.
-
-%======================================================================
-\section{Next Phase}
-
-Phase~4 keeps one end-to-end key for the whole session, so an attacker who later compromised that key
-could read every message ever exchanged under it. Phase~5 adds forward secrecy: the C1$\leftrightarrow$C2
-key is renegotiated on a timer, each new key independent of the last and the old one discarded, so a
-compromised key exposes only a bounded window of traffic.
 
 %======================================================================
 \appendix
@@ -1082,8 +1175,7 @@ reconstructed afterwards: entries are added in the commit that contains the work
 the git history shows the prompts accumulating phase by phase. It is organised by phase, and each
 entry records the prompt together with what came out of it.
 
-At the time of writing it covers Phase~0 (lab infrastructure, SSH access, network configuration,
-tooling and documentation) and Phase~1 (protocol design, implementation, evidence collection and this
-report). It will continue to grow as the remaining phases are implemented.
+It covers Phase~0 (lab infrastructure, SSH access, network configuration, tooling and documentation)
+and Phases~1 through~5 (protocol design, implementation, evidence collection and this report).
 
 \end{document}

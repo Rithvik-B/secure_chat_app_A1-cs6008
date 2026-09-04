@@ -3,7 +3,7 @@
 Wire protocol for the CS6008 secure chat application.
 
 This document describes the protocol **as currently implemented**. It grows with each phase; right
-now it covers Phases 1 through 4.
+now it covers all five phases.
 
 | Phase | Status | Adds |
 |---|---|---|
@@ -11,7 +11,7 @@ now it covers Phases 1 through 4.
 | 2 | implemented | Diffie-Hellman key exchange, AES-256-GCM record encryption |
 | 3 | implemented | Server authentication: certificate + proof of possession |
 | 4 | implemented | End-to-end encryption between clients (server-blind) |
-| 5 | not started | Key rotation |
+| 5 | implemented | End-to-end key rotation for forward secrecy |
 
 ---
 
@@ -19,7 +19,7 @@ now it covers Phases 1 through 4.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ L5  End-to-end (Phase 4)  __E2E_* inside <text>, C1<->C2  │
+│ L5  End-to-end (Phase 4-5) __E2E_* inside <text>, rekeyed │
 ├──────────────────────────────────────────────────────────┤
 │ L4  Application grammar   LOGIN / MSG / WHO / QUIT        │
 │                           OK / ERR / FROM / USERS / INFO  │
@@ -410,6 +410,35 @@ Two rules keep this unambiguous (§1.4 property 2): outgoing text starting with 
 a user cannot forge a tag; and a *plain* message from a peer with an active E2E session is flagged as
 a downgrade rather than shown as normal chat.
 
+## Key rotation (Phase 5)
+
+The E2E key is renegotiated every **60 s** for forward secrecy. No wire-format change — the `epoch`
+field already exists, and a rotation is just another `__E2E_INIT__` / `__E2E_ACK__` exchange for
+`epoch N+1`. Each new key comes from a fresh ephemeral Diffie-Hellman and is **never** derived from the
+old one; the old key is kept only for a ~10 s grace window (decrypt-only) and then wiped.
+
+```
+epoch N active
+  initiator sends __E2E_INIT__(epoch N+1, fresh pub)
+  responder replies __E2E_ACK__ (epoch N+1, fresh pub)
+  both derive epoch N+1 keys, log "E2E rekey -> epoch N+1  fingerprint FP"
+  epoch N key lingers GRACE_SEC, decrypt-only, then zeroised
+```
+
+Because every `__E2E_MSG__` carries its epoch, a message in flight across a rotation still decrypts
+(via the grace-window key), so chat is never interrupted.
+
+### Collision avoidance
+
+- **Only the initiator rotates** — the peer with the lexicographically smaller username, at 60 s. Both
+  sides compute the same initiator with no negotiation (usernames are unique).
+- The other peer holds a **75 s fallback** and initiates only if the initiator has gone silent.
+- **Tie-break**: if both send `__E2E_INIT__` for the same epoch at once, the smaller username wins; the
+  loser abandons its INIT and answers with an ACK. Deterministic — the two sides can never diverge.
+
+This is why compromising one epoch's key exposes only that ~60 s window: earlier and later epochs use
+independent secrets whose ephemeral private values were discarded.
+
 ---
 
 # Client command interface
@@ -479,7 +508,7 @@ Evidence in [`../evidence/phase1/`](../evidence/phase1/).
 # Constants
 
 ```c
-#define PROTO_VERSION      0x04
+#define PROTO_VERSION      0x05
 #define CHAT_PORT          5555
 
 #define MAX_RECORD         16384

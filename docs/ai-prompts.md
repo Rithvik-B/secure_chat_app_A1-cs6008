@@ -86,3 +86,9 @@ and the supporting documentation. No application code in this phase.
 # Phase 4 — End-to-End Encryption Between Clients
 
 15. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protocol.md, phase4/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase4/`: the self-test, the interleaved end-to-end transcript with the matching client-to-client fingerprints, the server relay log showing readable text before /e2e and opaque __E2E_MSG__ after it, and a Wireshark screenshot confirming the wire carries only ciphertext, write report until this phase4 as described in assignement linking all of these in report/main.tex final report at report.pdf"*
+
+---
+
+# Phase 5 — Forward Secrecy via Key Rotation
+
+16. *"Done with coding, read and understand the code, point out if any bugs exist and write documentations in docs/protocol.md, phase5/README.md and add comments in all the code files to help readers understand the implementations, I have collected `evidence/phase5/`: the self-test, the fingerprint timeline showing two rotations with changing-and-matching fingerprints, and the interleaved rekey transcript showing messages delivered before, across and after each rotation, write report until this phase5 as described in assignement linking all of these in report/main.tex final report at report.pdf"*

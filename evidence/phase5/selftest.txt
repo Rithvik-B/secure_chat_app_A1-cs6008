@@ -1,0 +1,32 @@
+DH group
+  [PASS] prime is 2048 bits
+  [PASS] modulus is prime
+  [PASS] (p-1)/2 is prime (safe prime)
+  [PASS] generator is 2
+hand-written modular exponentiation vs OpenSSL reference
+  [PASS] 2^e mod p matches for a range of exponents
+full key agreement
+  [PASS] two key pairs derive the identical shared secret
+  [PASS] peer value 0 is rejected
+AES-256-GCM
+  [PASS] seal then open round-trips
+  [PASS] any single-byte modification is rejected
+  [PASS] a record replayed at the wrong position is rejected
+base64
+  [PASS] encode/decode round-trips for every length 0..256
+  [PASS] malformed base64 is rejected
+end-to-end session
+  [PASS] handshake completes
+  [PASS] both sides are up
+  [PASS] independently-computed fingerprints match
+  [PASS] a2b message decrypts
+  [PASS] b2a message decrypts
+  [PASS] a message cannot be opened without the session
+key rotation (forward secrecy)
+  [PASS] two rotations produced three epochs
+  [PASS] the fingerprint changes on every rotation
+  [PASS] both sides agree on the fingerprint after each rotation
+  [PASS] an in-flight previous-epoch message still decrypts (grace window)
+  [PASS] a message sent right after a rotation decrypts
+
+ALL TESTS PASSED

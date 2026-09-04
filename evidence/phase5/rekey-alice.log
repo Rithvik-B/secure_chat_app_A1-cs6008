@@ -1,0 +1,13 @@
+07:22:38 server certificate verified (chatserver.local); key exchange complete, fingerprint 8607740babb827bb
+07:22:38 connected to 10.10.0.10:5555 as alice
+07:22:38 commands: @user msg | /chat user | /e2e user | /who | /quit
+07:22:38 ----------------------------------------------------
+07:22:40 * requesting end-to-end session with bob ...
+07:22:40 * end-to-end session established with bob, fingerprint edadeade4196261a
+07:22:43 you -> bob [e2e]: epoch 0: forward secrecy demo
+07:23:01 E2E rekey -> epoch 1 with bob  fingerprint d5b9d6fbd2bad80f
+07:23:01 you -> bob [e2e]: after the first rotation
+07:23:03 bob [e2e]> replying across a rekey
+07:23:21 E2E rekey -> epoch 2 with bob  fingerprint 0ab850ced4712d7f
+07:23:21 you -> bob [e2e]: after the second rotation
+07:23:24 * bye
